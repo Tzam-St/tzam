@@ -22,6 +22,21 @@ export interface AuthError {
   code?: string;
 }
 
+interface ApiError {
+  message?: string;
+}
+
+interface LoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+}
+
+interface ValidateResponse {
+  userId: string;
+  email: string;
+}
+
 const IDP_URL = process.env.IDP_URL || 'http://localhost:3001';
 
 export async function loginToIDP(email: string, password: string): Promise<LoginResult> {
@@ -32,11 +47,11 @@ export async function loginToIDP(email: string, password: string): Promise<Login
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Login failed' }));
+    const error = (await response.json().catch(() => ({ message: 'Login failed' }))) as ApiError;
     throw new Error(error.message || 'Login failed');
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as LoginResponse;
   return {
     accessToken: data.accessToken,
     refreshToken: data.refreshToken,
@@ -56,11 +71,13 @@ export async function registerToIDP(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Registration failed' }));
+    const error = (await response
+      .json()
+      .catch(() => ({ message: 'Registration failed' }))) as ApiError;
     throw new Error(error.message || 'Registration failed');
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as LoginResponse;
   return {
     accessToken: data.accessToken,
     refreshToken: data.refreshToken,
@@ -80,7 +97,12 @@ export async function validateIDPToken(token: string): Promise<TokenPayload | nu
     });
 
     if (!response.ok) return null;
-    return await response.json();
+    const data = (await response.json()) as ValidateResponse;
+    return {
+      userId: data.userId,
+      email: data.email,
+      exp: 0,
+    };
   } catch {
     return null;
   }
@@ -99,6 +121,6 @@ export async function refreshIDPToken(refreshToken: string): Promise<{ accessTok
     throw new Error('Token refresh failed');
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as { accessToken: string };
   return { accessToken: data.accessToken };
 }
