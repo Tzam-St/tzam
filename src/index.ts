@@ -114,7 +114,24 @@ export function createTzamClient(config: TzamConfig) {
     }
   }
 
-  return { login, register, validateToken, refreshToken, logout };
+  async function requestMagicLink(email: string, redirect?: string): Promise<void> {
+    const response = await fetch(`${url}/auth/magic-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, redirect }),
+    });
+
+    if (!response.ok && response.status !== 204) {
+      const error = (await response.json().catch(() => ({ message: 'Magic link request failed' }))) as ApiError;
+      throw new Error(error.message || 'Magic link request failed');
+    }
+  }
+
+  function getMagicLinkVerifyUrl(token: string): string {
+    return `${url}/auth/magic-link/verify?token=${encodeURIComponent(token)}`;
+  }
+
+  return { login, register, validateToken, refreshToken, logout, requestMagicLink, getMagicLinkVerifyUrl };
 }
 
 export type TzamClient = ReturnType<typeof createTzamClient>;
