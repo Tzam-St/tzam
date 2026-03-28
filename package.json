@@ -1,6 +1,6 @@
 {
   "name": "@carlosocarvalho/tzam",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Tzam - Tzam authentication client for Next.js - vigiar e proteger",
   "repository": "github:carlosocarvalho/tzam",
   "main": "./dist/index.js",
