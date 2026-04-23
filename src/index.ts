@@ -37,6 +37,17 @@ interface ValidateResponse {
   email: string;
 }
 
+export interface AppConfig {
+  clientId: string;
+  active: boolean;
+  methods: {
+    password: boolean;
+    magicLink: boolean;
+    otp: boolean;
+    oauth: { github: boolean; google: boolean };
+  };
+}
+
 export function createTzamClient(config: TzamConfig) {
   const { url, clientId, clientSecret } = config;
 
@@ -131,6 +142,68 @@ export function createTzamClient(config: TzamConfig) {
     return `${url}/auth/magic-link/verify?token=${encodeURIComponent(token)}`;
   }
 
+  /**
+   * Probe which auth methods are currently enabled for this client_id.
+   * Use this to decide what UI to render — forgotPassword() below is
+   * silent on failure (204) by design so it cannot be used as a signal.
+   */
+  async function getAuthMethods(): Promise<AppConfig> {
+    const response = await fetch(`${url}/auth/app-config?client_id=${encodeURIComponent(clientId)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({ message: 'Auth methods lookup failed' }))) as ApiError;
+      throw new Error(error.message || 'Auth methods lookup failed');
+    }
+
+    return (await response.json()) as AppConfig;
+  }
+
+  /**
+   * Request a password-reset email. The Tzam IdP routes the email through
+   * the calling app's organization-scoped email provider when client_id is
+   * configured (per-org branding, custom from-address). Server intentionally
+   * returns 204 even when the email does not exist — never reveals whether
+   * an account is registered.
+   *
+   * 204 does NOT guarantee an email was sent: if the app is inactive or the
+   * Email/Senha method is disabled for the app, the server silently drops
+   * the request (same status) to avoid leaking configuration. Call
+   * getAuthMethods() first to check methods.password before offering the
+   * reset flow to the user.
+   */
+  async function forgotPassword(email: string): Promise<void> {
+    const response = await fetch(`${url}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, clientId }),
+    });
+
+    if (!response.ok && response.status !== 204) {
+      const error = (await response.json().catch(() => ({ message: 'Forgot password failed' }))) as ApiError;
+      throw new Error(error.message || 'Forgot password failed');
+    }
+  }
+
+  /**
+   * Complete a password reset using the token delivered by forgotPassword.
+   * Throws on invalid/expired token.
+   */
+  async function resetPassword(token: string, newPassword: string): Promise<void> {
+    const response = await fetch(`${url}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, newPassword }),
+    });
+
+    if (!response.ok && response.status !== 204) {
+      const error = (await response.json().catch(() => ({ message: 'Password reset failed' }))) as ApiError;
+      throw new Error(error.message || 'Password reset failed');
+    }
+  }
+
   async function requestOtp(email: string): Promise<void> {
     const response = await fetch(`${url}/auth/otp`, {
       method: 'POST',
@@ -160,7 +233,20 @@ export function createTzamClient(config: TzamConfig) {
     return { accessToken: data.accessToken, refreshToken: data.refreshToken, user: data.user };
   }
 
-  return { login, register, validateToken, refreshToken, logout, requestMagicLink, getMagicLinkVerifyUrl, requestOtp, verifyOtp };
+  return {
+    login,
+    register,
+    validateToken,
+    refreshToken,
+    logout,
+    requestMagicLink,
+    getMagicLinkVerifyUrl,
+    requestOtp,
+    verifyOtp,
+    forgotPassword,
+    resetPassword,
+    getAuthMethods,
+  };
 }
 
 export type TzamClient = ReturnType<typeof createTzamClient>;

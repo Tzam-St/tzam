@@ -122,4 +122,112 @@ describe('createTzamClient', () => {
       await expect(client.logout('token', 'refresh')).resolves.toBeUndefined();
     });
   });
+
+  describe('forgotPassword', () => {
+    it('posts email + clientId so the IdP routes through the per-app SMTP', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 204 });
+
+      await client.forgotPassword('user@example.com');
+
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:4000/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'user@example.com', clientId: 'test-client' }),
+      });
+    });
+
+    it('treats 204 as success (no body to parse)', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 204 });
+      await expect(client.forgotPassword('a@b.com')).resolves.toBeUndefined();
+    });
+
+    it('throws with server message when request fails', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({ message: 'Mail provider unavailable' }),
+      });
+      await expect(client.forgotPassword('a@b.com')).rejects.toThrow('Mail provider unavailable');
+    });
+
+    it('falls back to a generic message when the server payload has none', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      });
+      await expect(client.forgotPassword('a@b.com')).rejects.toThrow('Forgot password failed');
+    });
+  });
+
+  describe('getAuthMethods', () => {
+    /**
+     * Thin probe around GET /auth/app-config. Consumers use it before
+     * rendering the auth UI because forgotPassword() (and other silent
+     * auth-email flows) return 204 even when the method is disabled for
+     * the app — this endpoint is the only non-leaky way to tell.
+     */
+    it('GETs /auth/app-config with the client_id and returns the parsed payload', async () => {
+      const payload = {
+        clientId: 'test-client',
+        active: true,
+        methods: {
+          password: true,
+          magicLink: false,
+          otp: false,
+          oauth: { github: false, google: true },
+        },
+      };
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => payload });
+
+      const result = await client.getAuthMethods();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4000/auth/app-config?client_id=test-client',
+        { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      );
+      expect(result).toEqual(payload);
+    });
+
+    it('throws with the server message when the request fails', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({ message: 'Upstream unavailable' }),
+      });
+
+      await expect(client.getAuthMethods()).rejects.toThrow('Upstream unavailable');
+    });
+
+    it('falls back to a generic message when the server payload has none', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+
+      await expect(client.getAuthMethods()).rejects.toThrow('Auth methods lookup failed');
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('posts token + newPassword to /auth/reset-password', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 204 });
+
+      await client.resetPassword('reset-tok-xxx', 'NewSecret123!');
+
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:4000/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'reset-tok-xxx', newPassword: 'NewSecret123!' }),
+      });
+    });
+
+    it('throws on invalid/expired token', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ message: 'Invalid or expired reset token' }),
+      });
+      await expect(client.resetPassword('bad', 'NewPass1!')).rejects.toThrow(
+        'Invalid or expired reset token',
+      );
+    });
+  });
 });
